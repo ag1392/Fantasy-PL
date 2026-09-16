@@ -45,29 +45,14 @@ doubles as a liquidity alarm. On the current feed there are four observations
 (1X2 plus one over/under line) against three parameters, so that alarm is
 weak for now.
 
-The conceded deduction is computed as `E[floor(GC/2)]` over the full
-distribution, not `E[GC]/2`. Since `floor(y) ≤ y` pointwise, the shortcut
-always overstates, by **103%** for a strong defence, enough on its own to
-misrank every premium defender. The error is exactly `½·P(GC odd)`.
-
 ### Tier 2: thin markets, liquid scale
 
-*Currently inactive: player markets are not on the free API tier. The code
-path exists and activates automatically if a paid plan supplies them.*
+*Requires Paid API tier*
 
 Anytime-goalscorer books exist on the exchange but are shallow. They are
 still useful for *relative* shape within a team, so they are used for shape
 and then rescaled so the team's player goal expectations sum to the team
-total implied by the liquid markets. A thin market supplies who, a deep one
-supplies how many.
-
-Prices are converted properly: `P(scores at least once)` inverts to an
-expected count via `mu = -ln(1 - p)`. Treating the probability as the
-expectation understates a 0.6-priced striker by more than 50%.
-
-These runners are **not** normalised to sum to 1, since several players can
-score in one match. Normalising a non-exclusive book is a real and easy
-mistake.
+total implied by the liquid markets. 
 
 ### Tier 3: where no market exists
 
