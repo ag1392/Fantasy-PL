@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+data/cache/*.json
+data/cache/*.csv
+data/cache/*.pkl
+data/out/
+# --- credentials: never commit ---
+.env
+secrets/
+*.pem
+*.crt
+*.key
+*.pfx
+
+# personal build/study notes - not part of the shipped project
+BUILD_NOTES.md
+STATS_PRIMER.md
+how_it_works.ipynb

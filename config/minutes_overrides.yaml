@@ -1,0 +1,24 @@
+# Manual minutes overrides - your knowledge beats the model here.
+#
+# The automatic model reads FPL availability flags and recent starts, but it
+# cannot hear a press conference. Anything you put here wins outright.
+#
+# Key by player id, web name, or "web name (TEAM)" when a name is ambiguous.
+#
+# Shorthand - just give expected minutes:
+#   Haaland: 0            # ruled out
+#   Salah: 65             # expected to be managed
+#
+# Or set the probabilities directly for finer control:
+#   Saka:
+#     p_start: 0.5        # P(starts)
+#     p_60: 0.4           # P(reaches 60 mins) - drives the 2-pt band + clean sheet
+#     p_play: 0.9         # P(appears at all)
+#     xmins: 55           # expected minutes - scales every per-90 rate
+#
+# Tip: run the "unmatched overrides" check in the notebook after editing -
+# a typo here silently does nothing otherwise.
+
+players: {}
+
+defaults: {}

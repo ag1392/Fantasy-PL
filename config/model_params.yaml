@@ -1,0 +1,246 @@
+# Fantasy-PL model parameters.
+#
+# PROVENANCE: every number below is either (a) read live from the FPL API, or
+# (b) fitted from data - the source is named. Nothing here is a guess.
+#
+# Fits marked [2025-26] were estimated from the full 2025-26 season
+# (29,757 player-gameweeks; 7,815 with 60+ minutes) via
+# vaastav/Fantasy-Premier-League merged_gw.csv.
+# Re-fit any time with:  python scripts/fit_params.py
+
+scoring:
+  # Verified empirically against the `explain` blocks of finished 2026-27
+  # gameweeks - these are observed point awards, not assumptions.
+  # Source of truth at runtime is bootstrap-static game_config.scoring;
+  # these act as a cross-check and supply the thresholds the API omits.
+  minutes:
+    short_play_min: 1      # 1-59 mins
+    short_play_pts: 1
+    long_play_min: 60      # 60+ mins
+    long_play_pts: 2
+  goals_scored: {GKP: 10, DEF: 6, MID: 5, FWD: 4}   # note: GKP goal = 10 in 2026-27
+  assists: 3
+  clean_sheets: {GKP: 4, DEF: 4, MID: 1, FWD: 0}
+  goals_conceded:
+    per_n_conceded: 2      # -1 per 2 conceded (floor division, verified)
+    pts: {GKP: -1, DEF: -1, MID: 0, FWD: 0}
+  saves:
+    per_n_saves: 3         # +1 per 3 saves (verified: 3->1, 5->1, 6->2, 8->2)
+    pts: 1
+  defensive_contribution:
+    # DC stat composition verified against live data:
+    #   DEF = tackles + clearances_blocks_interceptions
+    #   MID/FWD = tackles + CBI + recoveries
+    #   GKP = not tracked
+    # Thresholds verified by boundary search on finished gameweeks:
+    #   DEF: min scoring = 10, max non-scoring = 9
+    #   MID: min scoring = 12, max non-scoring = 11
+    # FWD: threshold 12, CONFIRMED on 2025-26 data - all 9 forwards who
+    # reached 12+ defensive actions received exactly 2 points. No forward has
+    # hit it yet in 2026-27 (max observed = 8), which is why it looks absent
+    # from this season's `explain` blocks. The hit-rate is ~1.2% of
+    # appearances, so it is worth about 0.02 points a game: real, but noise.
+    thresholds: {DEF: 10, MID: 12, FWD: 12}
+    pts: {GKP: 0, DEF: 2, MID: 2, FWD: 2}
+    capped_once: true      # flat 2 pts, does not repeat (21 actions still = 2)
+  yellow_cards: -1
+  red_cards: -3
+  own_goals: -2
+  penalties_saved: 5
+  penalties_missed: -2
+
+squad:
+  # Read live from bootstrap-static game_settings; mirrored for offline use.
+  size: 15
+  starting: 11
+  budget_tenths: 1000        # £100.0m
+  max_per_team: 3
+  select: {GKP: 2, DEF: 5, MID: 5, FWD: 3}
+  min_play: {GKP: 1, DEF: 3, MID: 2, FWD: 1}
+  max_play: {GKP: 1, DEF: 5, MID: 5, FWD: 3}
+
+rates:
+  # Per-90 attacking rates from a thin sample are noise, not signal. Measured
+  # on a live squad: xg90 has sd ~1.37 among players under 90 minutes (a single
+  # cameo shot implies a superhuman rate - one player showed xg90 = 15.3 off
+  # one minute) versus sd ~0.18 past 270 minutes, where it stabilises.
+  # Shrunk toward a (position, price) peer median using the Gamma-Poisson
+  # conjugate weight n/(n+k), with n and k both in nineties played. k=3 means
+  # three full matches of evidence carries equal weight to the prior.
+  prior_nineties: 3.0
+
+defcon:
+  # Negative-binomial dispersion phi = var/mean, solved so that the modelled
+  # threshold hit-rate exactly reproduces the observed rate. [2025-26]
+  #   DEF thr>=10: observed 27.00% -> phi = 1.383
+  #   MID thr>=12: observed 18.76% -> phi = 1.339
+  #   FWD thr>=12: observed  1.23% -> phi = 1.242
+  # A pure Poisson (phi=1) understates the hit-rate by ~1.4pp, so this matters.
+  dispersion: {DEF: 1.383, MID: 1.339, FWD: 1.242}
+  # Exchange linkage: defensive actions scale with how much a side is without
+  # the ball. Rate is scaled by (opponent_lambda / league_avg_lambda) ** beta,
+  # where opponent_lambda comes from the market-derived scoreline model.
+  #
+  # beta was FITTED, not assumed. Estimated within-player (so it cannot be
+  # confounded by some players simply being better defenders or playing for
+  # worse teams) by regressing log relative defensive actions on log relative
+  # expected goals conceded: n=6,349 appearances, 289 players.
+  #   pooled 0.070   DEF 0.102   MID 0.051   FWD 0.029
+  # The effect is real but far weaker than intuition suggests: a 5.6x swing in
+  # how much a side faces moves defensive actions only ~10%. An earlier value
+  # of 0.35 overstated it fivefold and mis-ranked fixtures badly.
+  opponent_scaling_beta: 0.070
+  league_avg_lambda: 1.45
+  # Shrinkage of a player's own rate toward the positional average, in nineties
+  # (Gamma-Poisson conjugate weight n/(n+k)).
+  #
+  # Chosen on out-of-sample error across FOUR training regimes, not one split.
+  # Error in predicted threshold hits, by training data available:
+  #        k      2 GWs    5 GWs   10 GWs   19 GWs    worst
+  #      0.5     -14.7%    -0.8%    -1.9%    +9.9%    14.7%   <- best
+  #        3     -28.0%   -12.4%    -8.5%    +4.7%    28.0%
+  #        8     -32.3%   -18.4%   -13.4%    +0.1%    32.3%
+  #
+  # k=8 calibrates the mid-season split perfectly and is badly over-fitted to
+  # it - with thin data it crushes every rate toward the mean, and because
+  # P(X >= threshold) is convex in the rate, compressing the spread lowers the
+  # aggregate. Light shrinkage is the better compromise.
+  #
+  # Unresolved: the value implied by the genuine between-player spread is ~2
+  # (DEF 2.5, MID 1.6, after removing sampling noise), while the mid-season fit
+  # wants ~8. That gap means rates move for real reasons - role, form, tactics -
+  # beyond sampling noise. One season cannot separate those.
+  prior_nineties: 0.5
+
+saves:
+  # E[saves] = intercept + slope * opponent_lambda   [2025-26, n=757, r=0.436]
+  # The intercept is essential: a keeper makes ~1.4 saves even in a quiet game.
+  # A through-origin fit badly misprices low-xGC fixtures.
+  intercept: 1.4118
+  slope: 0.9810
+  # within-GK var/mean = 0.984 -> Poisson is the right law for saves.
+  dispersion: 1.0
+
+assists:
+  # League-wide assists per goal [2025-26]: 942 assists / 1009 goals.
+  # Materially higher than the classic ~0.75 rule of thumb because FPL's
+  # assist definition is generous. Using 0.75 would underrate creators ~20%.
+  per_goal: 0.9336
+  # The ratio was measured across ALL goals, penalties included, so it is
+  # applied to all goals too. Stripping penalties out of the numerator only
+  # (a tempting "correction") would make the estimate biased low.
+
+cards:
+  # Per-90 rates by position [2025-26].
+  yellow_per90: {GKP: 0.0724, DEF: 0.1815, MID: 0.1877, FWD: 0.1495}
+  red_per90:    {GKP: 0.0013, DEF: 0.0082, MID: 0.0048, FWD: 0.0000}
+  # Tighter matches produce more cards; scaled by match closeness from the
+  # exchange match-odds market. 0 disables the adjustment.
+  closeness_beta: 0.25
+  # Shrinkage strength for an individual's card rate, in nineties played.
+  # Derived from the between-player spread once sampling noise is removed
+  # (k = mean / true_variance): DEF 41.8, MID 22.3, FWD 88.6 on 2025-26. Those
+  # per-position figures are unstable on small samples, so a single pooled
+  # value is used. The size of k is the real finding - card rates barely differ
+  # between players, so the positional average is nearly as good as anyone's
+  # own record, and an unshrunk rate is almost entirely noise.
+  # Unshrunk, one player showed 18.0 yellows per 90 (one card in five minutes),
+  # and such players supplied 18% of all card deductions league-wide.
+  prior_nineties: 30.0
+
+bonus:
+  # E[bonus] fitted linearly on the same events this model already projects,
+  # so it can be applied directly to expectations. [2025-26, 60+ min rows]
+  # R^2: GKP 0.36, DEF 0.35, MID 0.58, FWD 0.69.
+  # Clipped to [0, 3].
+  coefficients:
+    GKP: {goals: 0.000, assists: 0.382, clean_sheet: 0.790, defcon_hit: 0.000, saves: 0.128, const: -0.346}
+    DEF: {goals: 1.049, assists: 0.543, clean_sheet: 0.619, defcon_hit: 0.191, saves: 0.000, const: -0.079}
+    MID: {goals: 1.492, assists: 0.615, clean_sheet: -0.042, defcon_hit: 0.188, saves: 0.000, const: 0.000}
+    FWD: {goals: 1.429, assists: 0.288, clean_sheet: 0.012, defcon_hit: 0.126, saves: 0.000, const: -0.004}
+
+minutes:
+  # Auto prior from FPL status + recent starts, overridable per player in
+  # config/minutes_overrides.yaml.
+  lookback_gws: 6
+  recency_halflife_gws: 3.0     # exponential weighting of recent appearances
+  prior_pseudocount: 1.5        # shrinkage strength toward the price-based prior
+                                # (in units of "games worth of evidence")
+  # status -> availability multiplier, used when chance_of_playing is null
+  status_availability: {a: 1.0, d: 0.75, i: 0.0, s: 0.0, u: 0.0, n: 0.0}
+  # P(appears off the bench | did not start), as a saturating function of the
+  # player's start probability s:
+  #     floor + (p_max - floor) * s / (s + half_at)
+  # FITTED by maximum likelihood on 21,395 non-start observations in 2025-26,
+  # not assumed. Observed vs fitted, by start rate:
+  #     0.00-0.05  n=13,259   0.028 -> 0.026
+  #     0.05-0.15  n= 1,758   0.205 -> 0.228
+  #     0.15-0.30  n= 2,268   0.336 -> 0.335
+  #     0.30-0.50  n= 2,011   0.367 -> 0.382
+  #     0.50-0.70  n= 1,421   0.448 -> 0.407
+  #     0.70-0.90  n=   611   0.403 -> 0.423
+  #
+  # This replaced a flat 0.35 applied to (availability - p_start). That constant
+  # reproduced team *totals* on an availability-filtered pool, which is why it
+  # survived, but it was structurally backwards: it gave the most bench weight
+  # to the players furthest from the team. A player with p_start = 0.03 was
+  # credited with a 37% chance of appearing against a true 7%. Backtested over
+  # 2025-26 the old form over-predicted appearances by 31%.
+  sub_curve: {floor: 0.0183, p_max: 0.4717, half_at: 0.0951}
+  # Distinct substitutes appearing per team-match, measured over 2025-26
+  # (mean 4.19, median 4, sd 1.14). Five substitutions are allowed; not all are
+  # always used, and one player can occupy two of them.
+  subs_per_team: 4.19
+  normalise_team_subs: true
+  # Measured over a full season: 7,772 of 8,362 starters reached 60 minutes.
+  # Substitutions overwhelmingly happen AFTER the hour, so this is high. The
+  # previous value of 0.82 dragged every starter down through shrinkage, and
+  # since p_60 gates clean sheets it understated every defender.
+  p60_given_start_default: 0.9294
+  # A team starts exactly 11 players, so p_start must sum to 11 per team.
+  # Per-player shrinkage cannot see that constraint and drifted to 9.85.
+  normalise_team_starts: true
+  # Second-level shrinkage: pull each (position, price) bucket's start rate
+  # toward the global mean, so small homogeneous buckets cannot produce a
+  # prior of 1.0. Higher = more shrinkage.
+  bucket_shrinkage_k: 10.0
+  # No player is a certainty to start - late knocks and surprise rotation are
+  # irreducible. Caps p_start so that risk is never priced at zero.
+  p_start_ceiling: 0.97
+
+scoreline:
+  # Dixon-Coles bivariate model fitted to de-vigged exchange markets.
+  max_goals: 10
+  fit_markets: [MATCH_ODDS, OVER_UNDER_15, OVER_UNDER_25, OVER_UNDER_35, BOTH_TEAMS_TO_SCORE]
+  # Fallback when no exchange data is available for a fixture.
+  fallback_home_advantage: 0.26   # log-scale
+  fallback_league_avg_goals: 1.45
+
+oddsapi:
+  # The Odds API (https://the-odds-api.com) - the default live price source.
+  # It redistributes exchange prices (Betfair Exchange, Smarkets, Matchbook)
+  # alongside conventional bookmakers, so the model is fed odds that carry no
+  # bookmaker margin.
+  #
+  # Credit cost is markets x regions, independent of how many bookmakers are
+  # returned - so h2h + totals over the uk region is 2 credits and yields three
+  # exchanges at once. The free tier is 500 credits/month.
+  sport: soccer_epl
+  regions: uk
+  markets: h2h,totals
+  cache_seconds: 900
+  # True exchanges first (no bookmaker margin), then the sharpest bookmaker.
+  # Measured closing overround on 358 matches: exchange 1.0056,
+  # Pinnacle 1.0295, Bet365 1.0559. Live back/lay midpoint: 0.9987.
+  bookmaker_preference:
+    - betfair_ex_uk
+    - betfair_ex_eu
+    - smarkets
+    - matchbook
+    - pinnacle
+
+
+optimiser:
+  bench_weight: 0.12            # value of a bench slot via autosub, per xP
+  bench_gk_weight: 0.02
+  captain_multiplier: 2.0
