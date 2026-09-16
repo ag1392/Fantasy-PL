@@ -99,7 +99,12 @@ def run(
     ensure_dirs()
     warnings: list[str] = []
 
-    fpl = FPLClient()
+    # A max_age here overrides every endpoint's own cache window - not just
+    # bootstrap and fixtures, but the gameweek-live stats minutes history is
+    # built from and (below) market odds - so `run(max_age=0)` genuinely
+    # refreshes everything rather than only the two calls that happened to
+    # take the argument explicitly.
+    fpl = FPLClient(max_age=max_age) if max_age is not None else FPLClient()
     boot = fpl.bootstrap(max_age=max_age)
     event = event or fpl.target_event()
 
@@ -109,7 +114,7 @@ def run(
     players = build_players(boot)
     fixtures = build_fixtures(fpl.fixtures(max_age=max_age), boot)
 
-    minutes = estimate_minutes(players, build_minutes_history(fpl), event)
+    minutes = estimate_minutes(players, build_minutes_history(fpl, max_age=max_age), event)
     for w in minutes.attrs.get("override_warnings", []):
         warnings.append(f"minutes override not matched: {w}")
 
@@ -131,8 +136,12 @@ def run(
             client = OddsAPIClient()
             if not client.configured:
                 raise RuntimeError("ODDS_API_KEY not set")
+            # Fall back to the configured odds cache window only when the
+            # caller has not asked for a specific one.
+            odds_max_age = (max_age if max_age is not None
+                            else float(params()["oddsapi"]["cache_seconds"]))
             oa, oa_notes = scorelines_for_gameweek(
-                gw_named, client, max_age=float(params()["oddsapi"]["cache_seconds"])
+                gw_named, client, max_age=odds_max_age
             )
             scorelines.update(oa)
             warnings.extend(oa_notes)

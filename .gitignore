@@ -18,3 +18,7 @@ secrets/
 BUILD_NOTES.md
 STATS_PRIMER.md
 how_it_works.ipynb
+
+# backtesting notebooks and tests - dev-only, not part of the shipped project
+notebooks/backtest/
+tests/

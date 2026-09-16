@@ -31,16 +31,21 @@ import pandas as pd
 from ..config import overrides, params
 
 
-def build_minutes_history(client, events: list[int] | None = None) -> pd.DataFrame:
+def build_minutes_history(client, events: list[int] | None = None,
+                          max_age: float | None = None) -> pd.DataFrame:
     """Per-player, per-gameweek minutes from the cached ``live`` endpoints.
 
     Uses the gameweek live feeds rather than 658 individual element-summary
     calls - same information, two orders of magnitude fewer requests.
+
+    ``max_age`` is passed straight through to each ``client.live()`` call, so
+    a caller forcing a full refresh (``max_age=0``) also re-fetches these -
+    otherwise they sit at the client's own default (one hour).
     """
     events = events or client.finished_events()
     rows = []
     for ev in events:
-        for el in client.live(ev)["elements"]:
+        for el in client.live(ev, max_age=max_age)["elements"]:
             st = el["stats"]
             rows.append(
                 {
